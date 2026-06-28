@@ -1,0 +1,250 @@
+import React, { useState, useEffect } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
+import { 
+  ShieldCheck, Calendar, Image as ImageIcon, Settings, 
+  Save, Lock, Trash2, History, PlusCircle, BookOpen 
+} from 'lucide-react';
+
+// Firebase初期化
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+const CATEGORIES = [
+  { id: 1, name: "1条：挨拶・コミュニケーション" },
+  { id: 2, name: "2条：時間・デジタル機器のルール" },
+  { id: 3, name: "3条：家事・分担" },
+  { id: 4, name: "4条：お金・お小遣い" },
+  { id: 5, name: "5条：休日・レジャー" },
+  { id: 6, name: "6条：その他（緊急時の連絡先など）" }
+];
+
+export default function App() {
+  const [view, setView] = useState('home');
+  const [user, setUser] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [data, setData] = useState({
+    motto: "笑顔で支え合う、最高のチームになろう！",
+    events: [],
+    gallery: [],
+    laws: []
+  });
+
+  useEffect(() => {
+    const initAuth = async () => {
+      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+        // 必要に応じて認証ロジック追加
+      } else {
+        await signInAnonymously(auth);
+      }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, setUser);
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'family_portal_data');
+    const unsubscribe = onSnapshot(docRef, (docSnap) => {
+      if (docSnap.exists()) {
+        setData(docSnap.data());
+      }
+    }, (error) => console.error("Snapshot Error:", error));
+    return () => unsubscribe();
+  }, [user]);
+
+  const saveData = async (newData) => {
+    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'family_portal_data');
+    await setDoc(docRef, newData);
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans">
+      <nav className="bg-white border-b sticky top-0 z-50">
+        <div className="max-w-4xl mx-auto px-4 py-3 flex justify-between items-center">
+          <h1 className="text-xl font-bold text-blue-600 flex items-center gap-2 cursor-pointer" onClick={() => setView('home')}>
+            <ShieldCheck /> 家族憲法ポータル
+          </h1>
+          <div className="flex gap-4 items-center text-sm font-semibold">
+            <button onClick={() => setView('home')} className="hover:text-blue-600">HOME</button>
+            <button onClick={() => setView('viewer')} className="hover:text-blue-600">法律閲覧</button>
+            {isAdmin ? (
+              <button onClick={() => {setIsAdmin(false); setView('home')}} className="text-red-500">管理終了</button>
+            ) : (
+              <button onClick={() => setView('login')} className="text-blue-600"><Lock size={16} /></button>
+            )}
+          </div>
+        </div>
+      </nav>
+
+      <main className="max-w-4xl mx-auto p-4 pb-20">
+        {view === 'home' && <Dashboard data={data} />}
+        {view === 'login' && <LoginScreen setIsAdmin={setIsAdmin} setView={setView} />}
+        {view === 'viewer' && <ViewerScreen data={data} />}
+        {view === 'admin' && <AdminScreen data={data} saveData={saveData} />}
+      </main>
+    </div>
+  );
+}
+
+function Dashboard({ data }) {
+  return (
+    <div className="space-y-6">
+      <div className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white p-8 rounded-2xl shadow-lg">
+        <h2 className="text-sm opacity-80 uppercase tracking-widest mb-1">今年の家族の合言葉</h2>
+        <p className="text-2xl font-bold italic">"{data.motto || "未設定"}"</p>
+      </div>
+
+      <div className="grid md:grid-cols-2 gap-6">
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+          <h3 className="text-lg font-bold flex items-center gap-2 mb-4 text-slate-700"><Calendar className="text-blue-500"/> 今後の予定</h3>
+          <ul className="space-y-3">
+            {data.events?.length === 0 && <li className="text-slate-400 text-sm">予定はありません</li>}
+            {data.events?.map((e, i) => <li key={i} className="text-sm border-b pb-2">📅 <strong>{e.date}</strong>: {e.title}</li>)}
+          </ul>
+        </div>
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+          <h3 className="text-lg font-bold flex items-center gap-2 mb-4 text-slate-700"><ImageIcon className="text-pink-500"/> 思い出ギャラリー</h3>
+          <div className="grid grid-cols-2 gap-3">
+            {data.gallery?.length === 0 && <p className="text-slate-400 text-sm col-span-2">写真がありません</p>}
+            {data.gallery?.map((g, i) => (
+              <div key={i} className="bg-slate-200 h-24 rounded-lg flex items-center justify-center overflow-hidden border">
+                {g.url ? <img src={g.url} className="w-full h-full object-cover" alt="memo" /> : <span className="text-xs text-slate-400">画像あり</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AdminScreen({ data, saveData }) {
+  const [motto, setMotto] = useState(data.motto || "");
+  const [newEvent, setNewEvent] = useState({ date: '', title: '' });
+  const [newGalleryUrl, setNewGalleryUrl] = useState('');
+  const [newLaw, setNewLaw] = useState({ category: 1, title: '', content: '', reason: '' });
+
+  const updateList = (field, item, isAdd) => {
+    const list = data[field] || [];
+    const updated = isAdd ? [...list, item] : list.filter((_, i) => i !== item);
+    saveData({ ...data, [field]: updated });
+  };
+
+  return (
+    <div className="space-y-8">
+      {/* 設定セクション */}
+      <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+        <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Settings className="text-slate-500" /> サイト設定</h2>
+        <input className="w-full p-3 border rounded-lg mb-3" value={motto} onChange={e => setMotto(e.target.value)} placeholder="今年の目標・合言葉" />
+        <button onClick={() => saveData({...data, motto})} className="bg-green-600 text-white px-6 py-2 rounded-lg font-bold">更新</button>
+      </div>
+
+      {/* 法律管理 */}
+      <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+        <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><BookOpen className="text-blue-500" /> 法律の制定・改正</h2>
+        <div className="space-y-3 mb-6 bg-slate-50 p-4 rounded-lg">
+          <select className="w-full p-2 border rounded" onChange={e => setNewLaw({...newLaw, category: Number(e.target.value)})}>
+            {CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <input className="w-full p-2 border rounded" placeholder="ルールタイトル" value={newLaw.title} onChange={e => setNewLaw({...newLaw, title: e.target.value})} />
+          <textarea className="w-full p-2 border rounded" placeholder="内容詳細" value={newLaw.content} onChange={e => setNewLaw({...newLaw, content: e.target.value})} />
+          <input className="w-full p-2 border rounded" placeholder="作成・改正理由（家族会議ログ）" value={newLaw.reason} onChange={e => setNewLaw({...newLaw, reason: e.target.value})} />
+          <button onClick={() => {
+            if(!newLaw.title || !newLaw.content) return;
+            const lawItem = { ...newLaw, id: Date.now(), createdAt: new Date().toLocaleDateString() };
+            updateList('laws', lawItem, true);
+            setNewLaw({ category: 1, title: '', content: '', reason: '' });
+          }} className="bg-blue-600 text-white px-4 py-2 rounded w-full font-bold">法律を追加</button>
+        </div>
+        <div className="space-y-2">
+          {data.laws?.map((l, i) => (
+            <div key={i} className="flex justify-between items-start border p-3 rounded text-sm">
+              <div><strong>{l.title}</strong><p className="text-slate-500">{l.content}</p><small className="text-slate-400 italic">理由: {l.reason}</small></div>
+              <button onClick={() => updateList('laws', i, false)} className="text-red-500"><Trash2 size={16} /></button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* 予定管理 */}
+      <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+        <h2 className="text-xl font-bold mb-4">📅 予定管理</h2>
+        <div className="flex gap-2 mb-4">
+          <input className="w-1/3 p-2 border rounded" placeholder="日付(MM/DD)" value={newEvent.date} onChange={e => setNewEvent({...newEvent, date: e.target.value})} />
+          <input className="flex-1 p-2 border rounded" placeholder="内容" value={newEvent.title} onChange={e => setNewEvent({...newEvent, title: e.target.value})} />
+          <button onClick={() => { updateList('events', newEvent, true); setNewEvent({date:'', title:''}); }} className="bg-blue-600 text-white px-4 rounded"><PlusCircle /></button>
+        </div>
+        <ul className="space-y-2">
+          {data.events?.map((e, i) => (
+            <li key={i} className="flex justify-between items-center border p-2 rounded text-sm">
+              <span>{e.date}: {e.title}</span>
+              <button onClick={() => updateList('events', i, false)} className="text-red-500"><Trash2 size={16} /></button>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      {/* ギャラリー管理 */}
+      <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+        <h2 className="text-xl font-bold mb-4">📸 ギャラリー管理</h2>
+        <div className="flex gap-2 mb-4">
+          <input className="flex-1 p-2 border rounded" placeholder="写真URL" value={newGalleryUrl} onChange={e => setNewGalleryUrl(e.target.value)} />
+          <button onClick={() => { updateList('gallery', {url: newGalleryUrl}, true); setNewGalleryUrl(''); }} className="bg-pink-600 text-white px-4 rounded"><PlusCircle /></button>
+        </div>
+        <div className="grid grid-cols-4 gap-2">
+          {data.gallery?.map((g, i) => (
+            <div key={i} className="relative group bg-slate-100 h-20 rounded flex items-center justify-center overflow-hidden">
+              <img src={g.url} className="w-full h-full object-cover" alt="memo" />
+              <button onClick={() => updateList('gallery', i, false)} className="absolute bg-white/80 p-1 rounded-full text-red-500 opacity-0 group-hover:opacity-100"><Trash2 size={14} /></button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ViewerScreen({ data }) {
+  const [selectedCat, setSelectedCat] = useState(1);
+  const filteredLaws = data.laws?.filter(l => l.category === selectedCat).sort((a,b) => a.title.localeCompare(b.title));
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-2xl font-bold text-slate-800">法律閲覧</h2>
+      <select className="w-full p-3 border rounded-lg bg-white shadow-sm font-bold" onChange={(e) => setSelectedCat(Number(e.target.value))}>
+        {CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+      </select>
+      <div className="space-y-4">
+        {filteredLaws?.length === 0 && <p className="text-slate-500 text-center py-10">まだ法律が登録されていません。</p>}
+        {filteredLaws?.map(law => (
+          <div key={law.id} className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+            <h4 className="font-bold text-lg mb-2 text-blue-800">{law.title}</h4>
+            <p className="text-slate-600 mb-4 whitespace-pre-line">{law.content}</p>
+            <div className="text-xs text-slate-400 bg-slate-50 p-3 rounded-lg border">
+              <div className="flex items-center gap-1 font-bold text-slate-500 mb-1"><History size={12}/> 改正理由・背景</div>
+              {law.reason || "特に指定なし"}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function LoginScreen({ setIsAdmin, setView }) {
+  const [pass, setPass] = useState('');
+  return (
+    <div className="max-w-md mx-auto bg-white p-8 rounded-2xl shadow-lg border text-center">
+      <Lock className="mx-auto text-blue-500 mb-4" size={48} />
+      <h2 className="text-xl font-bold mb-4">管理者ログイン</h2>
+      <input type="password" placeholder="パスワード" className="w-full p-3 border rounded-lg mb-4" onChange={e => setPass(e.target.value)} />
+      <button onClick={() => { if(pass === 'family2026') { setIsAdmin(true); setView('admin'); } }} className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold">ログイン</button>
+    </div>
+  );
+}
